@@ -145,8 +145,7 @@ def sprawdz_ceny():
 
 # --- Start ---
 poprzednia_cena_niska = wczytaj_stan()
-zapisz_log_alertu("DIAGNOSTYKA", 99.99, "10:45 - 11:00")
-exit()
+
 
 # --- Harmonogram ---
 while True:
