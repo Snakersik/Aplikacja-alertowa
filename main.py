@@ -35,30 +35,50 @@ client = Client(TWILIO_SID, TWILIO_AUTH_TOKEN)
 
 # --- Zapisywanie i odczyt stanu z PostgreSQL -
 def zapisz_stan(czy_niska):
+    print(f"🔧 [DEBUG] Próba zapisania stanu: {czy_niska}")
+    print(f"🔧 [DEBUG] DATABASE_URL: {DATABASE_URL}")
     try:
         conn = psycopg2.connect(DATABASE_URL)
+        print("✅ [DEBUG] Połączono z bazą danych")
         cur = conn.cursor()
         cur.execute("UPDATE stan_alertu SET czy_niska = %s WHERE id = 1", (czy_niska,))
         conn.commit()
         cur.close()
         conn.close()
-        print(f"💾 Zapisano stan: {czy_niska}")
+        print(f"💾 [DEBUG] Zapisano stan: {czy_niska}")
+    except psycopg2.Error as db_err:
+        print("❌ [BŁĄD DB] psycopg2 error przy zapisie stanu:")
+        print(f"    {type(db_err).__name__}: {db_err.pgerror}")
+        print(f"    Kod: {db_err.pgcode}")
+        print(f"    Szczegóły: {db_err.diag.message_primary}")
     except Exception as e:
-        print(f"❌ Błąd zapisu stanu do bazy: {e}")
+        print(f"❌ [BŁĄD INNY] {type(e).__name__}: {str(e)}")
 
 def wczytaj_stan():
+    print("🔧 [DEBUG] Próba wczytania stanu z bazy...")
+    print(f"🔧 [DEBUG] DATABASE_URL: {DATABASE_URL}")
     try:
         conn = psycopg2.connect(DATABASE_URL)
+        print("✅ [DEBUG] Połączono z bazą danych")
         cur = conn.cursor()
         cur.execute("SELECT czy_niska FROM stan_alertu WHERE id = 1")
         wynik = cur.fetchone()
         cur.close()
         conn.close()
-        stan = wynik[0] if wynik else None
-        print(f"✅ Wczytano stan z bazy: {stan}")
-        return stan
+        if wynik:
+            print(f"✅ [DEBUG] Wczytany stan: {wynik[0]}")
+            return wynik[0]
+        else:
+            print("⚠️ [DEBUG] Brak rekordu o id=1 w stan_alertu")
+            return None
+    except psycopg2.Error as db_err:
+        print("❌ [BŁĄD DB] psycopg2 error przy wczytywaniu:")
+        print(f"    {type(db_err).__name__}: {db_err.pgerror}")
+        print(f"    Kod: {db_err.pgcode}")
+        print(f"    Szczegóły: {db_err.diag.message_primary}")
+        return None
     except Exception as e:
-        print(f"❌ Błąd odczytu stanu z bazy: {e}")
+        print(f"❌ [BŁĄD INNY] {type(e).__name__}: {str(e)}")
         return None
 
 # --- E-mail ---
@@ -92,19 +112,31 @@ def wyslij_whatsapp(content_sid):
 
 # --- Logi ---
 def zapisz_log_alertu(typ, cena, czas):
+    print("🔧 [DEBUG] Próba zapisania logu alertu...")
+    print(f"🔧 [DEBUG] DATABASE_URL: {DATABASE_URL}")
+    print(f"🔧 [DEBUG] Parametry: typ={typ}, cena={cena}, czas={czas}")
+    
     try:
         conn = psycopg2.connect(DATABASE_URL)
+        print("✅ [DEBUG] Połączono z bazą danych")
         cur = conn.cursor()
+
         cur.execute("""
             INSERT INTO log_alertow (data_wyslania, typ_alertu, cena, okres_czasowy)
             VALUES (NOW(), %s, %s, %s)
         """, (typ, cena, czas))
         conn.commit()
+        print("📝 [DEBUG] Zapisano log alertu do bazy")
+
         cur.close()
         conn.close()
-        print(f"📝 Zapisano log alertu do bazy: {typ}, {cena}, {czas}")
+    except psycopg2.Error as db_err:
+        print("❌ [BŁĄD DB] psycopg2 error:")
+        print(f"    {type(db_err).__name__}: {db_err.pgerror}")
+        print(f"    Kod: {db_err.pgcode}")
+        print(f"    Szczegóły: {db_err.diag.message_primary}")
     except Exception as e:
-        print(f"❌ Błąd zapisu logu do bazy: {e}")
+        print(f"❌ [BŁĄD INNY] {type(e).__name__}: {str(e)}")
 # --- Główna logika ---
 def sprawdz_ceny():
     global poprzednia_cena_niska
