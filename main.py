@@ -33,7 +33,7 @@ DATABASE_URL = os.getenv("DATABASE_URL")
 
 client = Client(TWILIO_SID, TWILIO_AUTH_TOKEN)
 
-# --- Zapisywanie i odczyt stanu z PostgreSQL ---
+# --- Zapisywanie i odczyt stanu z PostgreSQL -
 def zapisz_stan(czy_niska):
     try:
         conn = psycopg2.connect(DATABASE_URL)
