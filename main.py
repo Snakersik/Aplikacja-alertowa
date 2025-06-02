@@ -1,76 +1,65 @@
 import requests
 import smtplib
-import json
 import os
+import psycopg2
+import csv
 from email.mime.text import MIMEText
 from datetime import datetime
 import time
 from twilio.rest import Client
-import csv
 from dotenv import load_dotenv
+
 load_dotenv()
 
-# Konfiguracja e-maila (home.pl)
+# --- E-mail ---
 EMAIL_OD = os.getenv("EMAIL_OD")
 EMAIL_DO = os.getenv("EMAIL_DO").split(",")
 EMAIL_HASLO = os.getenv("EMAIL_HASLO")
 SMTP_SERVER = os.getenv("SMTP_SERVER")
 SMTP_PORT = int(os.getenv("SMTP_PORT"))
 
-# WhatsApp (Twilio)
+# --- WhatsApp ---
 TWILIO_SID = os.getenv("TWILIO_SID")
 TWILIO_AUTH_TOKEN = os.getenv("TWILIO_AUTH_TOKEN")
 TWILIO_WHATSAPP_FROM = os.getenv("TWILIO_WHATSAPP_FROM")
 WHATSAPP_NUMERY = os.getenv("WHATSAPP_NUMERY").split(",")
 
-
 TEMPLATE_SID_PONIZEJ = os.getenv("TEMPLATE_SID_PONIZEJ")
 TEMPLATE_SID_POWYZEJ = os.getenv("TEMPLATE_SID_POWYZEJ")
 
-STAN_ALERTU_FILE = "stan_alertu.json"
-LOG_FILE = "log_alertow.csv"
+# --- Railway DB ---
+DATABASE_URL = os.getenv("DATABASE_URL")
+
 
 client = Client(TWILIO_SID, TWILIO_AUTH_TOKEN)
 
-
-
-def zapisz_log_alertu(typ, cena, czas):
-    data = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-    wpis = [data, typ, f"{cena:.2f}", czas]
-
-    naglowek = ["Data_wyslania", "Typ_alertu", "Cena", "Okres_czasowy"]
-
-    plik_istnieje = os.path.exists(LOG_FILE)
-    try:
-        with open(LOG_FILE, "a", newline="") as f:
-            writer = csv.writer(f)
-            if not plik_istnieje:
-                writer.writerow(naglowek)
-            writer.writerow(wpis)
-    except Exception as e:
-        print(f"❌ Błąd zapisu do logu: {e}")
-
-# --- Zapisywanie i odczyt stanu ---
+# --- Zapisywanie i odczyt stanu z PostgreSQL ---
 def zapisz_stan(czy_niska):
     try:
-        with open(STAN_ALERTU_FILE, "w") as f:
-            json.dump({"niska_cena": czy_niska}, f)
+        conn = psycopg2.connect(DATABASE_URL)
+        cur = conn.cursor()
+        cur.execute("UPDATE stan_alertu SET czy_niska = %s WHERE id = 1", (czy_niska,))
+        conn.commit()
+        cur.close()
+        conn.close()
+        print(f"💾 Zapisano stan: {czy_niska}")
     except Exception as e:
-        print(f"❌ Błąd zapisu stanu: {e}")
+        print(f"❌ Błąd zapisu stanu do bazy: {e}")
 
 def wczytaj_stan():
-    if os.path.exists(STAN_ALERTU_FILE):
-        try:
-            with open(STAN_ALERTU_FILE, "r") as f:
-                dane = json.load(f)
-                print(f"✅ Wczytano stan: {dane}")
-                return dane.get("niska_cena")
-        except Exception as e:
-            print(f"❌ Błąd odczytu stanu: {e}")
-            return None
-    else:
-        print("ℹ️ Plik stanu nie istnieje.")
-    return None
+    try:
+        conn = psycopg2.connect(DATABASE_URL)
+        cur = conn.cursor()
+        cur.execute("SELECT czy_niska FROM stan_alertu WHERE id = 1")
+        wynik = cur.fetchone()
+        cur.close()
+        conn.close()
+        stan = wynik[0] if wynik else None
+        print(f"✅ Wczytano stan z bazy: {stan}")
+        return stan
+    except Exception as e:
+        print(f"❌ Błąd odczytu stanu z bazy: {e}")
+        return None
 
 # --- E-mail ---
 def wyslij_maila(temat, tresc):
@@ -88,7 +77,7 @@ def wyslij_maila(temat, tresc):
     except Exception as e:
         print(f"❌ Błąd e-mail: {e}")
 
-# --- WhatsApp (Twilio Templates) ---
+# --- WhatsApp ---
 def wyslij_whatsapp(content_sid):
     try:
         for numer in WHATSAPP_NUMERY:
@@ -101,7 +90,22 @@ def wyslij_whatsapp(content_sid):
     except Exception as e:
         print(f"❌ Błąd WhatsApp: {e}")
 
-# --- Sprawdzanie cen ---
+# --- Logi ---
+def zapisz_log_alertu(typ, cena, czas):
+    try:
+        conn = psycopg2.connect(DATABASE_URL)
+        cur = conn.cursor()
+        cur.execute("""
+            INSERT INTO log_alertow (data_wyslania, typ_alertu, cena, okres_czasowy)
+            VALUES (NOW(), %s, %s, %s)
+        """, (typ, cena, czas))
+        conn.commit()
+        cur.close()
+        conn.close()
+        print(f"📝 Zapisano log alertu do bazy: {typ}, {cena}, {czas}")
+    except Exception as e:
+        print(f"❌ Błąd zapisu logu do bazy: {e}")
+# --- Główna logika ---
 def sprawdz_ceny():
     global poprzednia_cena_niska
 
@@ -121,7 +125,6 @@ def sprawdz_ceny():
         return
 
     print(f"\n[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] Dane PSE:")
-
     for rekord in dane:
         cena = rekord.get("cen_prog", 9999)
         czas = rekord.get("udtczas_oreb", "brak")
@@ -158,7 +161,7 @@ def sprawdz_ceny():
         else:
             print("Cena nadal powyżej 30zł – brak akcji.")
 
-# --- START skryptu ---
+# --- Start ---
 poprzednia_cena_niska = wczytaj_stan()
 
 while True:
@@ -168,7 +171,7 @@ while True:
             sprawdz_ceny()
         except Exception as e:
             print(f"❌ Błąd główny: {e}")
-        time.sleep(60)  # sprawdzanie co minutę w dozwolonych godzinach
+        time.sleep(60)
     else:
         print(f"🌙 Poza godzinami działania (teraz {aktualna_godzina}:00) – pauza 10 min.")
-        time.sleep(600)  # śpij 10 minut poza zakresem działania
+        time.sleep(600)
