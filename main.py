@@ -11,8 +11,8 @@ from twilio.rest import Client
 from dotenv import load_dotenv
 
 load_dotenv()
-print(f"✅ [TEST] RAW env: {os.environ.get('DATABASE_URL')!r}")
-print(f"✅ [TEST] Parsed: {DATABASE_URL!r}")
+print(f"✅ [RAW] {os.environ.get('DATABASE_URL')!r}")
+DATABASE_URL = os.environ.get('DATABASE_URL')
 
 # --- E-mail ---
 EMAIL_OD = os.getenv("EMAIL_OD")
