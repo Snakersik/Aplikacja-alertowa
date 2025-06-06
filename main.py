@@ -8,6 +8,8 @@ import time
 from twilio.rest import Client
 from dotenv import load_dotenv
 import traceback
+from datetime import datetime
+from zoneinfo import ZoneInfo
 
 load_dotenv()
 
@@ -135,7 +137,8 @@ def sprawdz_ceny():
         print("⚠️ Brak danych z API.")
         return
 
-    print(f"\n[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] Dane PSE:")
+    czas_lokalny = datetime.now(ZoneInfo("Europe/Warsaw"))
+    print(f"\n[{czas_lokalny.strftime('%Y-%m-%d %H:%M:%S')}] Dane PSE:")
     for rekord in dane:
         cena = rekord.get("cen_prog", 9999)
         czas = rekord.get("udtczas_oreb", "brak")
@@ -176,7 +179,9 @@ poprzednia_cena_niska = wczytaj_stan()
 
 # --- Harmonogram ---
 while True:
-    godz = datetime.now().hour
+    czas_lokalny = datetime.now(ZoneInfo("Europe/Warsaw"))
+    godz = czas_lokalny.hour
+
     if 5 <= godz < 23:
         try:
             sprawdz_ceny()
