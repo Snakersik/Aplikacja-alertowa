@@ -122,7 +122,11 @@ def zapisz_log_alertu(typ, cena, czas):
 def sprawdz_ceny():
     global poprzednia_cena_niska
     dzis = datetime.now().strftime('%Y-%m-%d')
-    url = f"https://api.raporty.pse.pl/api/crb-prog?$filter=doba eq '{dzis}'"
+    url = (
+        "https://apimpdv2-bmgdhhajexe8aade.a01.azurefd.net/api/price-fcst"
+        f"?$filter=business_date eq '{dzis}'"
+        "&$orderby=dtime asc"
+    )
 
     try:
         response = requests.get(url)
@@ -138,15 +142,15 @@ def sprawdz_ceny():
         return
 
     czas_lokalny = datetime.now(ZoneInfo("Europe/Warsaw"))
-    print(f"\n[{czas_lokalny.strftime('%Y-%m-%d %H:%M:%S')}] Dane PSE:")
+    print(f"\n[{czas_lokalny.strftime('%Y-%m-%d %H:%M:%S')}] Dane PSE (prognoza):")
     for rekord in dane:
-        cena = rekord.get("cen_prog", 9999)
-        czas = rekord.get("udtczas_oreb", "brak")
+        cena = rekord.get("cen_fcst", 9999)
+        czas = rekord.get("period", rekord.get("dtime", "brak"))
         print(f"Godzina: {czas} | Cena: {cena} zł")
 
     ostatni_rekord = dane[-1]
-    cena = ostatni_rekord.get("cen_prog", 9999)
-    czas = ostatni_rekord.get("udtczas_oreb", "brak")
+    cena = ostatni_rekord.get("cen_fcst", 9999)
+    czas = ostatni_rekord.get("period", ostatni_rekord.get("dtime", "brak"))
 
     print(f"\n➡️ Ostatnia cena: {cena} zł o {czas}")
 
