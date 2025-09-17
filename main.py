@@ -10,6 +10,7 @@ from dotenv import load_dotenv
 import traceback
 from datetime import datetime
 from zoneinfo import ZoneInfo
+import ssl, socket
 
 load_dotenv()
 
@@ -71,20 +72,54 @@ def wczytaj_stan():
 
 # --- E-mail ---
 def wyslij_maila(temat, tresc):
-    try:
-        for adres in EMAIL_DO:
-            msg = MIMEText(tresc)
-            msg['Subject'] = temat
-            msg['From'] = EMAIL_OD
-            msg['To'] = adres
-            with smtplib.SMTP(SMTP_SERVER, SMTP_PORT) as server:
-                server.starttls()
-                server.login(EMAIL_OD, EMAIL_HASLO)
-                server.sendmail(EMAIL_OD, adres, msg.as_string())
-            print(f"📧 E-mail wysłany do: {adres}")
-    except Exception as e:
-        print(f"❌ Błąd e-mail: {e}")
-        traceback.print_exc()
+    to_list = [a.strip() for a in os.getenv("EMAIL_DO","").split(",") if a.strip()]
+    if not to_list:
+        print("⚠️ Brak odbiorców EMAIL_DO")
+        return
+
+    msg = MIMEText(tresc, _charset="utf-8")
+    msg["Subject"] = temat
+    msg["From"] = EMAIL_OD
+    msg["To"] = ", ".join(to_list)
+
+    ctx = ssl.create_default_context()
+
+    # Użyj wartości z .env, ale miej fallbacki gdyby łączenie się nie udało
+    primary = (os.getenv("SMTP_SERVER") or "smtp.home.pl", int(os.getenv("SMTP_PORT") or 465))
+    candidates = [
+        (*primary, "auto"),
+        ("smtp.home.pl", 465, "ssl"),
+        ("smtp.home.pl", 587, "starttls"),
+        ("serwer2003197.home.pl", 465, "ssl"),
+        ("serwer2003197.home.pl", 587, "starttls"),
+    ]
+
+    last_err = None
+    for host, port, mode in candidates:
+        try:
+            # wymuszamy IPv4 (częsty problem po restarcie z IPv6)
+            ipv4 = socket.getaddrinfo(host, port, socket.AF_INET)[0][4][0]
+            print(f"↪️ Próba SMTP {host}:{port} ({mode})")
+            if mode == "ssl" or (mode == "auto" and port == 465):
+                with smtplib.SMTP_SSL(ipv4, port, context=ctx, timeout=20) as server:
+                    server.login(EMAIL_OD, EMAIL_HASLO)
+                    server.sendmail(EMAIL_OD, to_list, msg.as_string())
+                print("✅ E-mail wysłany (SMTPS 465).")
+                return
+            else:  # STARTTLS 587
+                with smtplib.SMTP(ipv4, port, timeout=20) as server:
+                    server.ehlo()
+                    server.starttls(context=ctx)
+                    server.ehlo()
+                    server.login(EMAIL_OD, EMAIL_HASLO)
+                    server.sendmail(EMAIL_OD, to_list, msg.as_string())
+                print("✅ E-mail wysłany (STARTTLS 587).")
+                return
+        except Exception as e:
+            print(f"❌ Nieudana próba {host}:{port} – {e}")
+            last_err = e
+
+    raise RuntimeError(f"Nie udało się wysłać e-maila żadnym sposobem: {last_err}")
 
 # --- WhatsApp ---
 def wyslij_whatsapp(content_sid):
