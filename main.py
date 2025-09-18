@@ -76,18 +76,21 @@ def wyslij_maila(temat, tresc):
     if not EMAIL_OD:
         print("❌ Brak EMAIL_OD – nie wyślę e-maila.")
         return
-    if not EMAIL_DO:
+
+    to_list = [a.strip() for a in (os.getenv("EMAIL_DO") or "").split(",") if a.strip()]
+    if not to_list:
         print("⚠️ Brak odbiorców EMAIL_DO")
         return
 
+    # Każdy odbiorca w osobnej personalizacji → nikt nie widzi innych
+    personalizations = [{"to": [{"email": addr}]} for addr in to_list]
+
     payload = {
-        "personalizations": [{"to": [{"email": x} for x in EMAIL_DO]}],
+        "personalizations": personalizations,
         "from": {"email": EMAIL_OD, "name": "Alert"},
         "reply_to": {"email": EMAIL_OD},
         "subject": temat,
-        "content": [
-            {"type": "text/plain", "value": tresc}
-        ]
+        "content": [{"type": "text/plain", "value": tresc}]
     }
 
     try:
@@ -101,7 +104,7 @@ def wyslij_maila(temat, tresc):
             timeout=(5, 15)
         )
         if 200 <= r.status_code < 300:
-            print(f"✅ E-mail wysłany do: {', '.join(EMAIL_DO)} (SendGrid API)")
+            print(f"✅ E-mail wysłany (SendGrid) do {len(to_list)} odbiorców.")
         else:
             print(f"❌ SendGrid zwrócił {r.status_code}: {r.text}")
     except Exception as e:
