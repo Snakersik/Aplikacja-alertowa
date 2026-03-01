@@ -48,6 +48,21 @@ def zapisz_stan(czy_niska):
         print(f"❌ Błąd zapisu stanu: {e}")
         traceback.print_exc()
 
+def zapisz_zadanie_fs(wartosc):
+    """Zapisuje zadanie dla lokalnego pollera FusionSolar (0=pełna moc, 6=ograniczenie)."""
+    print(f"⚡ Zapisuję zadanie FusionSolar: {wartosc}")
+    try:
+        conn = psycopg2.connect(DATABASE_URL)
+        cur = conn.cursor()
+        cur.execute("UPDATE stan_alertu SET fs_zadanie = %s WHERE id = 1", (wartosc,))
+        conn.commit()
+        cur.close()
+        conn.close()
+        print(f"✅ Zadanie FusionSolar ({wartosc}) zapisane do bazy.")
+    except Exception as e:
+        print(f"❌ Błąd zapisu zadania FusionSolar: {e}")
+        traceback.print_exc()
+
 def wczytaj_stan():
     print("📥 Wczytywanie stanu z bazy...")
     try:
@@ -207,6 +222,7 @@ def sprawdz_ceny():
             zapisz_log_alertu("WYŁĄCZENIE", cena, czas)
             poprzednia_cena_niska = True
             zapisz_stan(True)
+            zapisz_zadanie_fs(6)
         else:
             print("🔁 Cena nadal niska – bez kolejnych powiadomień.")
     else:
@@ -220,6 +236,7 @@ def sprawdz_ceny():
             zapisz_log_alertu("WŁĄCZENIE", cena, czas)
             poprzednia_cena_niska = False
             zapisz_stan(False)
+            zapisz_zadanie_fs(0)
         else:
             print("🔁 Cena nadal powyżej 30zł – brak akcji.")
 
