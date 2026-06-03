@@ -1,4 +1,7 @@
-# main.py — wersja z wysyłką przez Twilio SendGrid (HTTP API)
+# main.py — Aplikacja-alertowa v2
+# Nowe: podział na 2 grupy klientów (manualni vs auto-sterowani)
+# - Manualni dostają stare wiadomości ("zalecamy wyłączenie")
+# - Auto-sterowani dostają nowe wiadomości ("ograniczyliśmy produkcję")
 
 import os
 import time
@@ -17,16 +20,27 @@ load_dotenv()
 # --- E-mail / SendGrid ---
 SENDGRID_API_KEY = os.getenv("SENDGRID_API_KEY")
 EMAIL_OD = os.getenv("EMAIL_OD")  # np. alert@techion.com.pl
+
+# Lista 1: STARZY klienci (manualnie sterują farmą — info "zalecamy wyłączenie")
 EMAIL_DO = [a.strip() for a in (os.getenv("EMAIL_DO") or "").split(",") if a.strip()]
+
+# Lista 2: NOWI klienci (my sterujemy farmą automatycznie — info "ograniczyliśmy produkcję")
+EMAIL_DO_AUTO = [a.strip() for a in (os.getenv("EMAIL_DO_AUTO") or "").split(",") if a.strip()]
 
 # --- WhatsApp (Twilio) ---
 TWILIO_SID = os.getenv("TWILIO_SID")
 TWILIO_AUTH_TOKEN = os.getenv("TWILIO_AUTH_TOKEN")
 TWILIO_WHATSAPP_FROM = os.getenv("TWILIO_WHATSAPP_FROM")
-WHATSAPP_NUMERY = [n.strip() for n in (os.getenv("WHATSAPP_NUMERY") or "").split(",") if n.strip()]
 
-TEMPLATE_SID_PONIZEJ = os.getenv("TEMPLATE_SID_PONIZEJ")
-TEMPLATE_SID_POWYZEJ = os.getenv("TEMPLATE_SID_POWYZEJ")
+# Lista 1: STARZY klienci (manualne sterowanie)
+WHATSAPP_NUMERY = [n.strip() for n in (os.getenv("WHATSAPP_NUMERY") or "").split(",") if n.strip()]
+TEMPLATE_SID_PONIZEJ = os.getenv("TEMPLATE_SID_PONIZEJ")   # "Zalecamy wyłączenie"
+TEMPLATE_SID_POWYZEJ = os.getenv("TEMPLATE_SID_POWYZEJ")   # "Zalecamy włączenie"
+
+# Lista 2: NOWI klienci (automatyczne sterowanie)
+WHATSAPP_NUMERY_AUTO = [n.strip() for n in (os.getenv("WHATSAPP_NUMERY_AUTO") or "").split(",") if n.strip()]
+TEMPLATE_SID_AUTO_WYL = os.getenv("TEMPLATE_SID_AUTO_WYL")   # "Ograniczyliśmy produkcję"
+TEMPLATE_SID_AUTO_ZAL = os.getenv("TEMPLATE_SID_AUTO_ZAL")   # "Przywróciliśmy normalną pracę"
 
 # --- Railway DB ---
 DATABASE_URL = (os.getenv("DATABASE_URL") or "").strip()
@@ -84,22 +98,16 @@ def wczytaj_stan():
         return None
 
 # -------------------- E-MAIL przez SendGrid --------------------
-def wyslij_maila(temat, tresc):
-    if not SENDGRID_API_KEY:
-        print("❌ Brak SENDGRID_API_KEY – nie wyślę e-maila.")
+def wyslij_maila(temat, tresc, odbiorcy):
+    """Wyślij mail do podanej listy odbiorców. Każdy w osobnej personalizacji (nikt się nie widzi)."""
+    if not odbiorcy:
+        print(f"⚠️ Brak odbiorców dla maila '{temat}' — pomijam")
         return
-    if not EMAIL_OD:
-        print("❌ Brak EMAIL_OD – nie wyślę e-maila.")
-        return
-
-    to_list = [a.strip() for a in (os.getenv("EMAIL_DO") or "").split(",") if a.strip()]
-    if not to_list:
-        print("⚠️ Brak odbiorców EMAIL_DO")
+    if not SENDGRID_API_KEY or not EMAIL_OD:
+        print("❌ Brak SENDGRID_API_KEY lub EMAIL_OD – nie wyślę e-maila.")
         return
 
-    # Każdy odbiorca w osobnej personalizacji → nikt nie widzi innych
-    personalizations = [{"to": [{"email": addr}]} for addr in to_list]
-
+    personalizations = [{"to": [{"email": addr}]} for addr in odbiorcy]
     payload = {
         "personalizations": personalizations,
         "from": {"email": EMAIL_OD, "name": "Alert"},
@@ -107,7 +115,6 @@ def wyslij_maila(temat, tresc):
         "subject": temat,
         "content": [{"type": "text/plain", "value": tresc}]
     }
-
     try:
         r = requests.post(
             "https://api.sendgrid.com/v3/mail/send",
@@ -119,43 +126,33 @@ def wyslij_maila(temat, tresc):
             timeout=(5, 15)
         )
         if 200 <= r.status_code < 300:
-            print(f"✅ E-mail wysłany (SendGrid) do {len(to_list)} odbiorców.")
+            print(f"✅ E-mail '{temat}' wysłany do {len(odbiorcy)} odbiorców.")
         else:
-            print(f"❌ SendGrid zwrócił {r.status_code}: {r.text}")
+            print(f"❌ SendGrid {r.status_code}: {r.text}")
     except Exception as e:
         print(f"❌ Błąd HTTP przy wysyłce e-maila: {e}")
         traceback.print_exc()
 
-def wyslij_mail_info_migracja():
-    """Jednorazowa wiadomość informująca o zmianie sposobu wysyłki (prośba o 'OK')."""
-    temat = "Aktualizacja sposobu wysyłki powiadomień – prosimy o krótkie potwierdzenie"
-    tresc = (
-        "Dzień dobry,\n\n"
-        "Od dziś wysyłamy powiadomienia e-mail przez zabezpieczoną platformę "
-        ".Nadawca i treść pozostają bez zmian — "
-        "a jej celem jest zwiększenie niezawodności dostarczania po niedawnym incydencie "
-        "sieciowym u dostawcy hostingu.\n\n"
-        "Uprzejmie prosimy o krótką odpowiedź, aby potwierdzić odbiór tej wiadomości.\n\n"
-        "Nadawca: Alert <alert@techion.com.pl>\n"
-        "Jeśli wiadomość trafiła do zakładki Oferty/Spam, prosimy dodać adres nadawcy do zaufanych.\n\n"
-        "Pozdrawiamy,\n"
-        "Zespół Techion"
-    )
-    wyslij_maila(temat, tresc)
-
 # -------------------- WhatsApp --------------------
-def wyslij_whatsapp(content_sid):
-    try:
-        for numer in WHATSAPP_NUMERY:
+def wyslij_whatsapp(content_sid, numery):
+    """Wyślij content_sid do podanej listy numerów."""
+    if not numery:
+        print(f"⚠️ Brak numerów dla SID {content_sid[:8] if content_sid else 'None'}... — pomijam")
+        return
+    if not content_sid:
+        print("⚠️ Brak content_sid — pomijam wysyłkę WhatsApp")
+        return
+    for numer in numery:
+        try:
             client.messages.create(
                 to=numer,
                 from_=TWILIO_WHATSAPP_FROM,
                 content_sid=content_sid
             )
-            print(f"📲 WhatsApp wysłany do: {numer}")
-    except Exception as e:
-        print(f"❌ Błąd WhatsApp: {e}")
-        traceback.print_exc()
+            print(f"📲 WhatsApp ({content_sid[:8]}...) wysłany do: {numer}")
+        except Exception as e:
+            print(f"❌ Błąd WhatsApp do {numer}: {e}")
+            traceback.print_exc()
 
 # -------------------- Logi --------------------
 def zapisz_log_alertu(typ, cena, czas):
@@ -184,7 +181,6 @@ def sprawdz_ceny():
         f"?$filter=business_date eq '{dzis}'"
         "&$orderby=dtime asc"
     )
-
     try:
         response = requests.get(url, timeout=(5, 12))
         response.raise_for_status()
@@ -201,24 +197,35 @@ def sprawdz_ceny():
     czas_lokalny = datetime.now(ZoneInfo("Europe/Warsaw"))
     print(f"\n[{czas_lokalny.strftime('%Y-%m-%d %H:%M:%S')}] Dane PSE (prognoza):")
     for rekord in dane:
-        cena = rekord.get("cen_fcst", 9999)
-        czas = rekord.get("period", rekord.get("dtime", "brak"))
-        print(f"Godzina: {czas} | Cena: {cena} zł")
+        cena_p = rekord.get("cen_fcst", 9999)
+        czas_p = rekord.get("period", rekord.get("dtime", "brak"))
+        print(f"Godzina: {czas_p} | Cena: {cena_p} zł")
 
     ostatni_rekord = dane[-1]
     cena = ostatni_rekord.get("cen_fcst", 9999)
     czas = ostatni_rekord.get("period", ostatni_rekord.get("dtime", "brak"))
-
     print(f"\n➡️ Ostatnia cena: {cena} zł o {czas}")
 
     if cena <= 30:
         if poprzednia_cena_niska is not True:
-            print("⚠️ Cena niska - wysyłamy powiadomienia o wyłączeniu farmy...")
+            print("⚠️ Cena niska — wysyłamy powiadomienia do OBU grup klientów...")
+
+            # === GRUPA 1: STARZY KLIENCI (manualne sterowanie) ===
             wyslij_maila(
                 "UWAGA Możliwe ujemne wartości",
-                "UWAGA! Możliwe ujemne wartości rozliczeń za energię elektryczną. Zalecamy wyłączenie farmy."
+                "UWAGA! Możliwe ujemne wartości rozliczeń za energię elektryczną. Zalecamy wyłączenie farmy.",
+                EMAIL_DO
             )
-            wyslij_whatsapp(TEMPLATE_SID_PONIZEJ)
+            wyslij_whatsapp(TEMPLATE_SID_PONIZEJ, WHATSAPP_NUMERY)
+
+            # === GRUPA 2: NOWI KLIENCI (auto-sterowani, my wyłączyliśmy) ===
+            wyslij_maila(
+                "Ograniczyliśmy produkcję Państwa farmy PV",
+                "UWAGA! Ujemne ceny energii — ograniczyliśmy produkcję Państwa farmy PV. Wznowienie nastąpi automatycznie.",
+                EMAIL_DO_AUTO
+            )
+            wyslij_whatsapp(TEMPLATE_SID_AUTO_WYL, WHATSAPP_NUMERY_AUTO)
+
             zapisz_log_alertu("WYŁĄCZENIE", cena, czas)
             poprzednia_cena_niska = True
             zapisz_stan(True)
@@ -227,12 +234,24 @@ def sprawdz_ceny():
             print("🔁 Cena nadal niska – bez kolejnych powiadomień.")
     else:
         if poprzednia_cena_niska is True:
-            print("✅ Cena wzrosła – wysyłamy powiadomienia o możliwości włączenia farmy...")
+            print("✅ Cena wzrosła — wysyłamy powiadomienia do OBU grup klientów...")
+
+            # === GRUPA 1: STARZY KLIENCI (manualne sterowanie) ===
             wyslij_maila(
                 "Wartości rozliczeń dodatnie",
-                "Wartośći rozliczeń za energię elektryczną dodatnie. Zalecamy rozważenie włączenia farmy."
+                "Wartości rozliczeń za energię elektryczną dodatnie. Zalecamy rozważenie włączenia farmy.",
+                EMAIL_DO
             )
-            wyslij_whatsapp(TEMPLATE_SID_POWYZEJ)
+            wyslij_whatsapp(TEMPLATE_SID_POWYZEJ, WHATSAPP_NUMERY)
+
+            # === GRUPA 2: NOWI KLIENCI (auto-sterowani, my włączyliśmy) ===
+            wyslij_maila(
+                "Przywróciliśmy normalną pracę Państwa farmy PV",
+                "Dodatnie ceny energii — przywróciliśmy normalną pracę Państwa farmy PV.",
+                EMAIL_DO_AUTO
+            )
+            wyslij_whatsapp(TEMPLATE_SID_AUTO_ZAL, WHATSAPP_NUMERY_AUTO)
+
             zapisz_log_alertu("WŁĄCZENIE", cena, czas)
             poprzednia_cena_niska = False
             zapisz_stan(False)
@@ -241,13 +260,10 @@ def sprawdz_ceny():
             print("🔁 Cena nadal powyżej 30zł – brak akcji.")
 
 # -------------------- Start --------------------
-print("🚀 Aplikacja alertowa wystartowała")
+print("🚀 Aplikacja alertowa v2 wystartowała")
+print(f"   Grupa MANUALNA: {len(EMAIL_DO)} email, {len(WHATSAPP_NUMERY)} WhatsApp")
+print(f"   Grupa AUTO:     {len(EMAIL_DO_AUTO)} email, {len(WHATSAPP_NUMERY_AUTO)} WhatsApp")
 poprzednia_cena_niska = wczytaj_stan()
-
-# --- Jednorazowy komunikat o migracji (ustaw SEND_INFO_ONCE=1 w .env i uruchom raz) ---
-if os.getenv("SEND_INFO_ONCE", "0") == "1":
-    print("📣 Wysyłam jednorazową informację o migracji wysyłki e-mail…")
-    wyslij_mail_info_migracja()
 
 # -------------------- Harmonogram --------------------
 while True:
