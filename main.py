@@ -176,8 +176,10 @@ def zapisz_log_alertu(typ, cena, czas):
 def sprawdz_ceny():
     global poprzednia_cena_niska
     dzis = datetime.now().strftime('%Y-%m-%d')
+    # 2026-07-01: CDN azurefd zaczal zwracac 403 dla IP Railway (blokada datacenter).
+    # Przelaczone na oficjalna domene api.raporty.pse.pl (dziala z Railway, ten sam schemat).
     url = (
-        "https://apimpdv2-bmgdhhajexe8aade.a01.azurefd.net/api/price-fcst"
+        "https://api.raporty.pse.pl/api/price-fcst"
         f"?$filter=business_date eq '{dzis}'"
         "&$orderby=dtime asc"
     )
